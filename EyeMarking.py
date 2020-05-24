@@ -4,7 +4,7 @@ import math
 import cv2
 import numpy as np
 
-from Exceptions import TooMuchFacesException
+from Exceptions import TooMuchFacesException, TooMuchEyesException
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger('eye_scanner')
@@ -22,17 +22,21 @@ def detect_eyes(img):
         '/Users/maximilianandre/Software/IdeaProjects/FaceAlignment/venv/lib/python3.7/site-packages/cv2/data/haarcascade_eye.xml')
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces: np.ndarray = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=15)
+    faces: np.ndarray = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=35, minSize=(700, 700))
 
     eye_x_y_list = []
     LOGGER.info(f"Found {len(faces)} faces")
-    if True or len(faces) == 1 and faces.shape[0] == 1:
+    if len(faces) == 1 and faces.shape[0] == 1:
+        for (x, y, w, h) in faces:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 255, 0), 2)
+            cv2.rectangle(img, (x, y), (x + w, y + int(h / 2)), (122, 122, 0), 2)
         (x, y, w, h) = faces[0]
-        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 255, 0), 2)
-        roi_gray = gray[y:y + h, x:x + w]
-        roi_color = img[y:y + h, x:x + w]
-        eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.2, minNeighbors=15)
+        roi_gray = gray[y:y + int(h / 2), x:x + w]
+        roi_color = img[y:y + int(h / 2), x:x + w]
+        eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.02, minNeighbors=25, minSize=(100, 100))
         LOGGER.info(f"Found {len(eyes)} eyes")
+        if len(eyes) == 0 or eyes.shape[0] != 2:
+            raise TooMuchEyesException(f"Too many Eyes where found. {len(eyes)} eyes detected")
         for (ex, ey, ew, eh) in eyes:
             cv2.rectangle(roi_color, (ex, ey), (ex + ew, ey + eh), (0, 127, 255), 2)
             eye_x_y_list.append((x + ex + ew * 0.5, y + ey + eh * 0.5))
@@ -53,8 +57,8 @@ def find_left_eye(eye_coordinates):
 
 def eye_translation(img, eye_coordinates, x_scaling_factor, y_scaling_factor):
     left_eye_coordinate = find_left_eye(eye_coordinates)
-    should_x = 78 * x_scaling_factor
-    should_y = 160 * y_scaling_factor
+    should_x = 905 * x_scaling_factor
+    should_y = 1350 * y_scaling_factor
     translation_x = should_x - left_eye_coordinate[0] * x_scaling_factor
     translation_y = should_y - left_eye_coordinate[1] * y_scaling_factor
     rows, cols, ch = img.shape
@@ -110,14 +114,20 @@ def calculate_scaling_factor(img, x_scale, y_scale):
     return x_scaling_factor, y_scaling_factor
 
 
+def scale_and_extract_information_from(img):
+    x_scale = 2320
+    y_scale = 3088
+    x_scaling_factor, y_scaling_factor = calculate_scaling_factor(img, x_scale, y_scale)
+
+    detection_img = resize_image(img, x_scale, y_scale)
+    debug_information_img, eye_list = detect_eyes(detection_img)
+    return debug_information_img, eye_list, x_scaling_factor, y_scaling_factor
+
+
 def transform_image(img):
     detection_img = img.copy()
-    x_scale = 200
-    y_scale = 366
-    x_scaling_factor, y_scaling_factor = calculate_scaling_factor(detection_img, x_scale, y_scale)
 
-    detection_img = resize_image(detection_img, x_scale, y_scale)
-    detection_img, eye_list = detect_eyes(detection_img)
+    _, eye_list, x_scaling_factor, y_scaling_factor = scale_and_extract_information_from(detection_img)
 
     radian_of_rotation = angle_of_points(eye_list[0], eye_list[1])
     degree_of_rotation = radian_of_rotation * 180 / np.pi
@@ -133,10 +143,11 @@ def transform_image(img):
 
 
 if __name__ == '__main__':
-    img = cv2.imread("TEST_FACE.jpeg")
+    img = cv2.imread("IMG_ - 16.jpeg")
 
-    detection_img, eye_list = detect_eyes(img)
+    img, _, _, _ = scale_and_extract_information_from(img)
 
-    cv2.imshow('image', detection_img)
+    img = resize_image(img, 660, 808)
+    cv2.imshow('image', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
