@@ -1,5 +1,7 @@
 import logging
 import math
+from operator import itemgetter
+from typing import Tuple
 
 import cv2
 import numpy as np
@@ -9,6 +11,11 @@ from Exceptions import TooMuchFacesException, TooMuchEyesException
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger('eye_scanner')
 
+EYE_CASCADE = cv2.CascadeClassifier(
+    '/Users/maximilianandre/Software/IdeaProjects/FaceAlignment/venv/lib/python3.7/site-packages/cv2/data/haarcascade_eye.xml')
+FACE_CASCADE = cv2.CascadeClassifier(
+    '/Users/maximilianandre/Software/IdeaProjects/FaceAlignment/venv/lib/python3.7/site-packages/cv2/data/haarcascade_frontalface_default.xml')
+
 
 def detect_eyes(img):
     """
@@ -16,35 +23,75 @@ def detect_eyes(img):
     :param img:
     :return:
     """
-    face_cascade = cv2.CascadeClassifier(
-        '/Users/maximilianandre/Software/IdeaProjects/FaceAlignment/venv/lib/python3.7/site-packages/cv2/data/haarcascade_frontalface_default.xml')
-    eye_cascade = cv2.CascadeClassifier(
-        '/Users/maximilianandre/Software/IdeaProjects/FaceAlignment/venv/lib/python3.7/site-packages/cv2/data/haarcascade_eye.xml')
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces: np.ndarray = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=35, minSize=(700, 700))
+    faces: np.ndarray = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=35, minSize=(700, 700))
 
-    eye_x_y_list = []
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 255, 0), 2)
+        cv2.rectangle(img, (x, y), (x + w, y + int(h / 2)), (122, 122, 0), 2)
+
     LOGGER.info(f"Found {len(faces)} faces")
-    if len(faces) == 1 and faces.shape[0] == 1:
-        for (x, y, w, h) in faces:
-            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 255, 0), 2)
-            cv2.rectangle(img, (x, y), (x + w, y + int(h / 2)), (122, 122, 0), 2)
-        (x, y, w, h) = faces[0]
-        roi_gray = gray[y:y + int(h / 2), x:x + w]
-        roi_color = img[y:y + int(h / 2), x:x + w]
-        eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.02, minNeighbors=25, minSize=(100, 100))
-        LOGGER.info(f"Found {len(eyes)} eyes")
-        if len(eyes) == 0 or eyes.shape[0] != 2:
-            raise TooMuchEyesException(f"Too many Eyes where found. {len(eyes)} eyes detected")
-        for (ex, ey, ew, eh) in eyes:
-            cv2.rectangle(roi_color, (ex, ey), (ex + ew, ey + eh), (0, 127, 255), 2)
-            eye_x_y_list.append((x + ex + ew * 0.5, y + ey + eh * 0.5))
-    else:
-
+    if len(faces) < 1:
         raise TooMuchFacesException(f"Too many faces where found. {len(faces)} faces detected")
 
+    elif len(faces) > 1:
+        gray_dimensions = (gray.shape[0], gray.shape[1])
+        faces = find_best_face(faces, gray_dimensions)
+
+    (x, y, w, h) = faces[0]
+    roi_gray = gray[y:y + int(h / 2), x:x + w]
+    roi_dimensions = (roi_gray.shape[0], roi_gray.shape[1])
+    eye_x_y_list = find_eyes(roi_gray, x, y, roi_dimensions)
+
+    for x, y in eye_x_y_list:
+        cv2.circle(img, (int(x), int(y)), 50, (255, 255, 0), 2)
     return img, eye_x_y_list
+
+
+def find_best_face(all_face, rectangle_size):
+    face_distance = map_by_distance_to_middle(all_face, rectangle_size)
+    return [face_distance[0][1]]
+
+
+def map_by_distance_to_middle(points, rectangle_size):
+    middle = (int(rectangle_size[0] / 2), int(rectangle_size[1] / 2))
+    distance_with_point = []
+    for face in points:
+        (x, y, w, h) = face
+        distance_to_middle = calculate_distance(middle, (x, y))
+        distance_with_point.append((distance_to_middle, face))
+    distance_with_point = sorted(distance_with_point, key=itemgetter(0))
+    return distance_with_point
+
+
+def find_best_fitting(all_eye, rectangle_size):
+    eye_distance = map_by_distance_to_middle(all_eye, rectangle_size)
+    return eye_distance[0][1], eye_distance[1][1]
+
+
+def calculate_distance(point_1: Tuple[int, int], point_2: Tuple[int, int]) -> float:
+    if len(point_1) != len(point_2):
+        raise ValueError(f"Points have to be in the same dimension. Point 1: {len(point_1)}, Point 2: {len(point_2)}")
+    raw_dist = 0
+    for index in range(len(point_1)):
+        raw_dist += math.pow((point_1[index] - point_2[index]), 2)
+
+    return math.sqrt(raw_dist)
+
+
+def find_eyes(roi_gray, crop_x: int, crop_y: int, rectangle_size: Tuple[int]):
+    eyes = EYE_CASCADE.detectMultiScale(roi_gray, scaleFactor=1.02, minNeighbors=25, minSize=(100, 100))
+    eye_x_y_list = []
+    LOGGER.info(f"Found {len(eyes)} eyes")
+    if len(eyes) < 2:
+        raise TooMuchEyesException(f"Too many Eyes where found. {len(eyes)} eyes detected")
+    elif len(eyes) > 2:
+        LOGGER.warning(f"Found {len(eyes)}, will search for the two best.")
+        eyes = find_best_fitting(eyes, rectangle_size)
+    for (ex, ey, ew, eh) in eyes:
+        eye_x_y_list.append((crop_x + ex + ew * 0.5, crop_y + ey + eh * 0.5))
+    return eye_x_y_list
 
 
 def find_left_eye(eye_coordinates):
@@ -143,7 +190,7 @@ def transform_image(img):
 
 
 if __name__ == '__main__':
-    img = cv2.imread("IMG_ - 16.jpeg")
+    img = cv2.imread("IMG_ - 87.jpeg")
 
     img, _, _, _ = scale_and_extract_information_from(img)
 

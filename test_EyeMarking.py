@@ -2,7 +2,7 @@ from unittest import TestCase
 
 import numpy as np
 
-from EyeMarking import angle_of_points, calculate_scaling_factor, find_left_eye
+from EyeMarking import angle_of_points, calculate_scaling_factor, find_left_eye, find_best_fitting, calculate_distance
 
 
 class AngleConversionTestCase(TestCase):
@@ -33,3 +33,19 @@ class AngleConversionTestCase(TestCase):
         eye_coordinates = [(1, 100), (0, 0)]
         left_eye_coordinate = find_left_eye(eye_coordinates)
         self.assertEqual(left_eye_coordinate, (0, 0))
+
+
+class FindNearestEye(TestCase):
+    def test_find_best_fitting(self):
+        eyes = [(2, 1, 1, 1), (5, 4, 1, 1), (3, 3, 1, 1)]
+        rectangle = (6, 3)
+        best_fitting_eyes = find_best_fitting(eyes, rectangle)
+
+        self.assertTupleEqual(((2, 1, 1, 1), (3, 3, 1, 1)), best_fitting_eyes)
+
+    def test_calculate_distance(self):
+        p1 = (10, 1)
+        p2 = (20, 1)
+
+        d = calculate_distance(p1, p2)
+        self.assertEqual(d, 10)
